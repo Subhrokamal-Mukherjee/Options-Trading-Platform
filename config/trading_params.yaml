@@ -1,0 +1,4 @@
+# Placeholder for future phases.
+# Phase 1 has no trading execution parameters.
+max_capital_per_trade_pct: null
+max_total_exposure_pct: null
