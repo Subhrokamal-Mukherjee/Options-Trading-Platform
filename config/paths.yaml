@@ -1,0 +1,4 @@
+raw_root: data/raw
+verified_root: data/raw/verified
+metadata_root: data/metadata
+instrument_tokens_path: data/metadata/instrument_tokens.parquet
