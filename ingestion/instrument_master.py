@@ -1,10 +1,18 @@
-"""Phase 1 instrument master ingestion for NSE index options universe.
+"""Credentials can be supplied via .env using KITE_API_KEY and KITE_ACCESS_TOKEN.
+
+Phase 1 instrument master ingestion for NSE index options universe.
 
 This module downloads the Kite instruments dump, filters to configured symbols,
 and stores a normalized parquet artifact used by downstream ingestion scripts.
 """
 
 from __future__ import annotations
+
+import os
+
+from dotenv import load_dotenv
+
+load_dotenv()
 
 import argparse
 import logging
@@ -104,8 +112,16 @@ def save_instrument_master(df: pd.DataFrame, output_path: Path) -> None:
 def parse_args() -> argparse.Namespace:
     """Parse command line arguments."""
     parser = argparse.ArgumentParser(description="Download and persist Kite instrument master")
-    parser.add_argument("--api-key", required=True)
-    parser.add_argument("--access-token", required=True)
+    parser.add_argument(
+        "--api-key",
+        default=os.getenv("KITE_API_KEY"),
+        help="Kite API key, fallback to KITE_API_KEY from .env",
+    )
+    parser.add_argument(
+        "--access-token",
+        default=os.getenv("KITE_ACCESS_TOKEN"),
+        help="Kite access token, fallback to KITE_ACCESS_TOKEN from .env",
+    )
     parser.add_argument(
         "--output-path",
         default="data/metadata/instrument_tokens.parquet",
@@ -119,6 +135,8 @@ def main() -> None:
     """CLI entrypoint."""
     logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(message)s")
     args = parse_args()
+    if not args.api_key or not args.access_token:
+        raise ValueError("Missing Kite API_KEY or ACCESS_TOKEN. Provide via .env or CLI.")
     config = InstrumentMasterConfig(
         api_key=args.api_key,
         access_token=args.access_token,

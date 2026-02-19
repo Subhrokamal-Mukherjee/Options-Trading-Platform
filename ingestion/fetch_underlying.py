@@ -1,9 +1,17 @@
-"""Phase 1 underlying 5-minute historical ingestion.
+"""Credentials can be supplied via .env using KITE_API_KEY and KITE_ACCESS_TOKEN.
+
+Phase 1 underlying 5-minute historical ingestion.
 
 Stores parquet partitioned by symbol/year for strict local reproducibility.
 """
 
 from __future__ import annotations
+
+import os
+
+from dotenv import load_dotenv
+
+load_dotenv()
 
 import argparse
 import logging
@@ -90,8 +98,16 @@ def save_underlying_partitioned(df: pd.DataFrame, output_root: Path) -> Path:
 def parse_args() -> argparse.Namespace:
     """Parse CLI arguments."""
     parser = argparse.ArgumentParser(description="Fetch 5-minute underlying candles")
-    parser.add_argument("--api-key", required=True)
-    parser.add_argument("--access-token", required=True)
+    parser.add_argument(
+        "--api-key",
+        default=os.getenv("KITE_API_KEY"),
+        help="Kite API key, fallback to KITE_API_KEY from .env",
+    )
+    parser.add_argument(
+        "--access-token",
+        default=os.getenv("KITE_ACCESS_TOKEN"),
+        help="Kite access token, fallback to KITE_ACCESS_TOKEN from .env",
+    )
     parser.add_argument("--instrument-tokens", default="data/metadata/instrument_tokens.parquet", type=Path)
     parser.add_argument("--output-root", default="data/raw", type=Path)
     parser.add_argument("--symbol", choices=["NIFTY", "BANKNIFTY"], required=True)
@@ -104,6 +120,8 @@ def main() -> None:
     """CLI entrypoint."""
     logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(message)s")
     args = parse_args()
+    if not args.api_key or not args.access_token:
+        raise ValueError("Missing Kite API_KEY or ACCESS_TOKEN. Provide via .env or CLI.")
     config = UnderlyingIngestionConfig(
         api_key=args.api_key,
         access_token=args.access_token,
