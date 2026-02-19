@@ -1,0 +1,6 @@
+symbols:
+  - NIFTY
+  - BANKNIFTY
+interval: 5minute
+exchange: NSE
+derivatives_exchange: NFO
