@@ -4,7 +4,7 @@ This repository implements a phase-wise, modular system for a **3–5 day volati
 
 ## Current Status
 
-✅ **Phase 1 implemented**: Data ingestion architecture only.
+ **Phase 1 implemented**: Data ingestion architecture only.
 
 Included in Phase 1:
 - Instrument master ingestion from Kite Connect
