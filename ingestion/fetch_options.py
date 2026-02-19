@@ -2,27 +2,29 @@
 
 Phase 1 options 5-minute historical ingestion.
 
-Downloads option candles for configured symbol and expiries, stored partitioned by
-symbol/year/expiry as parquet.
+This module fetches option candles in monthly windows to prevent silent truncation
+at Kite historical API limits. It applies strict fail-loud integrity checks and
+uses deterministic overwrite writes so reruns remain idempotent.
 """
 
 from __future__ import annotations
 
+import argparse
+import logging
+import os
+import shutil
+from dataclasses import dataclass
+from datetime import datetime, timedelta
+from pathlib import Path
+
+import pandas as pd
 import os
 
 from dotenv import load_dotenv
 
 load_dotenv()
 
-import argparse
-import logging
-from dataclasses import dataclass
-from datetime import datetime
-from pathlib import Path
-
 BASE_DIR = Path(__file__).resolve().parents[1]
-
-import pandas as pd
 
 
 @dataclass(frozen=True)
@@ -37,6 +39,27 @@ class OptionIngestionConfig:
     start: datetime
     end: datetime
     interval: str = "5minute"
+
+
+def monthly_windows(start: datetime, end: datetime) -> list[tuple[datetime, datetime]]:
+    """Split a datetime range into non-overlapping calendar-month windows."""
+    if start > end:
+        raise ValueError(f"Invalid range: start ({start}) is after end ({end})")
+
+    windows: list[tuple[datetime, datetime]] = []
+    cursor = start
+
+    while cursor <= end:
+        month_start = cursor.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        next_month = (month_start + timedelta(days=32)).replace(day=1)
+        month_end = next_month - timedelta(microseconds=1)
+
+        window_start = cursor
+        window_end = month_end if month_end < end else end
+        windows.append((window_start, window_end))
+        cursor = window_end + timedelta(microseconds=1)
+
+    return windows
 
 
 def _build_kite_client(api_key: str, access_token: str):
@@ -72,8 +95,26 @@ def _load_option_contracts(path: Path, symbol: str, start: datetime, end: dateti
     return filtered
 
 
+def _assert_options_integrity(df: pd.DataFrame, symbol: str) -> None:
+    """Run fail-loud integrity checks after options chunk concatenation."""
+    if df["date"].isna().any():
+        raise RuntimeError(f"Null timestamps found in options dataset for symbol={symbol}")
+
+    duplicate_count = int(df.duplicated(subset=["date", "tradingsymbol"]).sum())
+    if duplicate_count > 0:
+        raise RuntimeError(
+            f"Duplicate rows found in options dataset for symbol={symbol}: {duplicate_count}"
+        )
+
+    for tradingsymbol, group in df.groupby("tradingsymbol", sort=False):
+        if not group["date"].is_monotonic_increasing:
+            raise RuntimeError(
+                f"Timestamp chronology violation for tradingsymbol={tradingsymbol}"
+            )
+
+
 def fetch_options_candles(config: OptionIngestionConfig) -> pd.DataFrame:
-    """Fetch 5-minute candles for all selected option contracts."""
+    """Fetch 5-minute candles for all selected option contracts in monthly chunks."""
     if config.interval != "5minute":
         raise ValueError("Phase 1 hard constraint violated: only 5minute interval is allowed")
 
@@ -82,43 +123,95 @@ def fetch_options_candles(config: OptionIngestionConfig) -> pd.DataFrame:
     )
     kite = _build_kite_client(config.api_key, config.access_token)
 
-    all_frames: list[pd.DataFrame] = []
+    windows = monthly_windows(config.start, config.end)
+    logger = logging.getLogger(__name__)
+    all_chunks: list[pd.DataFrame] = []
+
     for row in contracts.itertuples(index=False):
-        candles = kite.historical_data(
-            instrument_token=int(row.instrument_token),
-            from_date=config.start,
-            to_date=config.end,
-            interval=config.interval,
-            continuous=False,
-            oi=True,
-        )
-        if not candles:
-            continue
+        contract_rows = 0
+        for window_start, window_end in windows:
+            candles = kite.historical_data(
+                instrument_token=int(row.instrument_token),
+                from_date=window_start,
+                to_date=window_end,
+                interval=config.interval,
+                continuous=False,
+                oi=True,
+            )
+            chunk_df = pd.DataFrame(candles)
 
-        frame = pd.DataFrame(candles)
-        frame["date"] = pd.to_datetime(frame["date"], utc=True)
-        frame["symbol"] = config.symbol
-        frame["expiry"] = pd.to_datetime(row.expiry)
-        frame["strike"] = float(row.strike)
-        frame["option_type"] = str(row.instrument_type)
-        frame["tradingsymbol"] = str(row.tradingsymbol)
-        frame["instrument_token"] = int(row.instrument_token)
-        all_frames.append(frame)
+            if len(chunk_df) == 0:
+                logger.info(
+                    "Options chunk | symbol=%s | tradingsymbol=%s | window_start=%s | window_end=%s | rows=0",
+                    config.symbol,
+                    row.tradingsymbol,
+                    window_start,
+                    window_end,
+                )
+                continue
 
-    if not all_frames:
+            if len(chunk_df) >= 2000:
+                raise RuntimeError(
+                    f"Chunk reached API limit for {config.symbol} {window_start} to {window_end}. "
+                    "Reduce window size."
+                )
+
+            chunk_df["date"] = pd.to_datetime(chunk_df["date"], utc=True)
+            chunk_df["symbol"] = config.symbol
+            chunk_df["expiry"] = pd.to_datetime(row.expiry)
+            chunk_df["strike"] = float(row.strike)
+            chunk_df["option_type"] = str(row.instrument_type)
+            chunk_df["tradingsymbol"] = str(row.tradingsymbol)
+            chunk_df["instrument_token"] = int(row.instrument_token)
+            all_chunks.append(chunk_df)
+            contract_rows += len(chunk_df)
+
+            logger.info(
+                "Options chunk | symbol=%s | tradingsymbol=%s | window_start=%s | window_end=%s | rows=%s",
+                config.symbol,
+                row.tradingsymbol,
+                window_start,
+                window_end,
+                len(chunk_df),
+            )
+
+        if contract_rows == 0:
+            logger.info(
+                "Options contract had no candles | symbol=%s | tradingsymbol=%s",
+                config.symbol,
+                row.tradingsymbol,
+            )
+
+    if not all_chunks:
         raise ValueError("No option candles returned from Kite for selected contracts")
 
-    return pd.concat(all_frames, ignore_index=True).sort_values(["date", "tradingsymbol"]).reset_index(
-        drop=True
+    df = pd.concat(all_chunks, ignore_index=True)
+    df = df.drop_duplicates(subset=["date", "tradingsymbol"])\
+        .sort_values(["tradingsymbol", "date"]).reset_index(drop=True)
+
+    _assert_options_integrity(df, config.symbol)
+
+    logger.info(
+        "Options ingestion complete | symbol=%s | total_rows=%s | months_processed=%s | contracts=%s",
+        config.symbol,
+        len(df),
+        len(windows),
+        contracts["tradingsymbol"].nunique(),
     )
+
+    return df.sort_values(["date", "tradingsymbol"]).reset_index(drop=True)
 
 
 def save_options_partitioned(df: pd.DataFrame, output_root: Path) -> Path:
-    """Persist options candles partitioned by symbol/year/expiry."""
+    """Persist options candles partitioned by symbol/year/expiry using overwrite semantics."""
     payload = df.copy()
     payload["year"] = payload["date"].dt.year
     payload["expiry_partition"] = payload["expiry"].dt.strftime("%Y-%m-%d")
     target = output_root / "options"
+
+    if target.exists():
+        shutil.rmtree(target)
+
     payload.to_parquet(target, partition_cols=["symbol", "year", "expiry_partition"], index=False)
     return target
 
@@ -136,7 +229,11 @@ def parse_args() -> argparse.Namespace:
         default=os.getenv("KITE_ACCESS_TOKEN"),
         help="Kite access token, fallback to KITE_ACCESS_TOKEN from .env",
     )
-    parser.add_argument("--instrument-tokens", default=BASE_DIR / "data" / "metadata" / "instrument_tokens.parquet", type=Path)
+    parser.add_argument(
+        "--instrument-tokens",
+        default=BASE_DIR / "data" / "metadata" / "instrument_tokens.parquet",
+        type=Path,
+    )
     parser.add_argument("--output-root", default=BASE_DIR / "data" / "raw", type=Path)
     parser.add_argument("--symbol", choices=["NIFTY", "BANKNIFTY"], required=True)
     parser.add_argument("--start", required=True, help="YYYY-MM-DD")
@@ -150,6 +247,7 @@ def main() -> None:
     args = parse_args()
     if not args.api_key or not args.access_token:
         raise ValueError("Missing Kite API_KEY or ACCESS_TOKEN. Provide via .env or CLI.")
+
     config = OptionIngestionConfig(
         api_key=args.api_key,
         access_token=args.access_token,
