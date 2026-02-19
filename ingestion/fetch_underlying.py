@@ -19,6 +19,8 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
+BASE_DIR = Path(__file__).resolve().parents[1]
+
 import pandas as pd
 
 
@@ -108,8 +110,8 @@ def parse_args() -> argparse.Namespace:
         default=os.getenv("KITE_ACCESS_TOKEN"),
         help="Kite access token, fallback to KITE_ACCESS_TOKEN from .env",
     )
-    parser.add_argument("--instrument-tokens", default="data/metadata/instrument_tokens.parquet", type=Path)
-    parser.add_argument("--output-root", default="data/raw", type=Path)
+    parser.add_argument("--instrument-tokens", default=BASE_DIR / "data" / "metadata" / "instrument_tokens.parquet", type=Path)
+    parser.add_argument("--output-root", default=BASE_DIR / "data" / "raw", type=Path)
     parser.add_argument("--symbol", choices=["NIFTY", "BANKNIFTY"], required=True)
     parser.add_argument("--start", required=True, help="YYYY-MM-DD")
     parser.add_argument("--end", required=True, help="YYYY-MM-DD")

@@ -18,6 +18,8 @@ import argparse
 import logging
 from dataclasses import dataclass
 from pathlib import Path
+
+BASE_DIR = Path(__file__).resolve().parents[1]
 from typing import Final
 
 import pandas as pd
@@ -124,7 +126,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--output-path",
-        default="data/metadata/instrument_tokens.parquet",
+        default=BASE_DIR / "data" / "metadata" / "instrument_tokens.parquet",
         type=Path,
         help="Destination parquet path",
     )

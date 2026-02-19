@@ -12,6 +12,8 @@ from dataclasses import dataclass
 from datetime import time
 from pathlib import Path
 
+BASE_DIR = Path(__file__).resolve().parents[1]
+
 import pandas as pd
 
 
@@ -153,9 +155,9 @@ def validate_phase1(config: ValidationConfig) -> dict[str, int]:
 def parse_args() -> argparse.Namespace:
     """Parse CLI arguments."""
     parser = argparse.ArgumentParser(description="Validate Phase 1 raw ingestion artifacts")
-    parser.add_argument("--raw-root", default="data/raw", type=Path)
-    parser.add_argument("--verified-root", default="data/raw/verified", type=Path)
-    parser.add_argument("--metadata-root", default="data/metadata", type=Path)
+    parser.add_argument("--raw-root", default=BASE_DIR / "data" / "raw", type=Path)
+    parser.add_argument("--verified-root", default=BASE_DIR / "data" / "raw" / "verified", type=Path)
+    parser.add_argument("--metadata-root", default=BASE_DIR / "data" / "metadata", type=Path)
     return parser.parse_args()
 
 

@@ -9,6 +9,8 @@ import argparse
 import logging
 from pathlib import Path
 
+BASE_DIR = Path(__file__).resolve().parent
+
 from ingestion.validator import ValidationConfig, validate_phase1
 
 
@@ -16,9 +18,9 @@ def parse_args() -> argparse.Namespace:
     """Parse top-level CLI arguments."""
     parser = argparse.ArgumentParser(description="Weekly options volatility system pipeline")
     parser.add_argument("--phase", type=int, required=True, choices=[1])
-    parser.add_argument("--raw-root", default="data/raw", type=Path)
-    parser.add_argument("--verified-root", default="data/raw/verified", type=Path)
-    parser.add_argument("--metadata-root", default="data/metadata", type=Path)
+    parser.add_argument("--raw-root", default=BASE_DIR / "data" / "raw", type=Path)
+    parser.add_argument("--verified-root", default=BASE_DIR / "data" / "raw" / "verified", type=Path)
+    parser.add_argument("--metadata-root", default=BASE_DIR / "data" / "metadata", type=Path)
     return parser.parse_args()
 
 
