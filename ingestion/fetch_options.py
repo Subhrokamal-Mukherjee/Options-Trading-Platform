@@ -18,8 +18,6 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 import pandas as pd
-import os
-
 from dotenv import load_dotenv
 
 load_dotenv()
