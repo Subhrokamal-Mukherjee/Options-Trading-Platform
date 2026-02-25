@@ -4,15 +4,24 @@ This repository implements a phase-wise, modular system for a **3–5 day volati
 
 ## Current Status
 
-✅ **Phase 1 implemented**: Data ingestion architecture only.
+✅ **Phase 1 implemented**: Data ingestion architecture.
+
+✅ **Phase 2 implemented**: Deterministic ATM reconstruction from consolidated UDiFF daily options data.
 
 Included in Phase 1:
 - Instrument master ingestion from Kite Connect
-- Historical 5-minute underlying ingestion
-- Historical 5-minute options ingestion
+- Historical 5-minute underlying ingestion (monthly chunked)
+- Historical 5-minute options ingestion (monthly chunked)
 - Fail-loud raw data validation checks
 
-No modeling/backtesting/risk execution logic is part of this phase.
+Included in Phase 2:
+- Deterministic ATM selection per `TRADE_DATE` × `SYMBOL`
+- `DTE >= 3` expiry selection with minimum DTE rule
+- ATM strike tie-break toward lower strike
+- CE/PE pair enforcement and straddle construction
+- Monthly ATM parquet output: `atm_daily_YYYY_MM.parquet`
+
+No modeling/backtesting/risk execution logic is included yet.
 
 ## Environment Setup
 
@@ -58,10 +67,28 @@ python ingestion/fetch_options.py --symbol NIFTY --start 2024-01-01 --end 2024-0
 python main.py --phase 1
 ```
 
+## Phase 2 CLI Command
+
+### Build deterministic daily ATM dataset from consolidated UDiFF parquet
+
+```bash
+python ingestion/atm_reconstruction.py \
+  --input-path data/processed/nifty_banknifty_jan_2024.parquet \
+  --output-dir data/processed \
+  --min-dte 3
+```
+
+This produces:
+- `data/processed/atm_daily_YYYY_MM.parquet`
+
 ## Output Artifacts
 
+Phase 1:
 - `data/metadata/instrument_tokens.parquet`
-- `data/raw/underlying` (partitioned)
-- `data/raw/options` (partitioned)
+- `data/raw/underlying` (partitioned by `symbol/year`)
+- `data/raw/options` (partitioned by `symbol/year/expiry_partition`)
 - `data/raw/verified/*` (post-validation)
 - `data/metadata/phase1_validation_report.json`
+
+Phase 2:
+- `data/processed/atm_daily_YYYY_MM.parquet`
